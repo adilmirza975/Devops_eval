@@ -1,0 +1,122 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  PROJECT_NAME: shopsmartrevised
+
+jobs:
+  test:
+    name: Phase 1 - Testing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install Dependencies (Root)
+        run: npm install
+
+      - name: Install Dependencies (Client)
+        run: cd client && npm install
+
+      - name: Install Dependencies (Server)
+        run: cd server && npm install
+
+      - name: Run Client Tests
+        run: cd client && npm test -- --run
+
+      - name: Run Server Tests
+        run: cd server && npm test
+
+      - name: Run E2E Tests
+        run: npx playwright install --with-deps && npm run test:e2e
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/test-results/
+            **/playwright-report/
+
+  terraform:
+    name: Phase 2 - Infrastructure Provisioning
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: cd terraform && terraform init -backend=false
+
+      - name: Terraform Validate
+        run: cd terraform && terraform validate
+
+      - name: Terraform Plan
+        run: cd terraform && terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        run: cd terraform && terraform apply -auto-approve tfplan
+
+  deploy:
+    name: Phase 3 - Container Build and ECS Deployment
+    needs: terraform
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/${{ env.PROJECT_NAME }}-repo:$IMAGE_TAG .
+          docker build -t $ECR_REGISTRY/${{ env.PROJECT_NAME }}-repo:latest .
+          docker push $ECR_REGISTRY/${{ env.PROJECT_NAME }}-repo:$IMAGE_TAG
+          docker push $ECR_REGISTRY/${{ env.PROJECT_NAME }}-repo:latest
+          echo "image=$ECR_REGISTRY/${{ env.PROJECT_NAME }}-repo:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Update ECS Service
+        run: |
+          aws ecs update-service --cluster ${{ env.PROJECT_NAME }}-cluster --service ${{ env.PROJECT_NAME }}-service --force-new-deployment
+
