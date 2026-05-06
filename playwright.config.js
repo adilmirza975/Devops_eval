@@ -15,12 +15,20 @@ export default defineConfig({
             use: { ...devices['Desktop Chrome'] },
         },
     ],
-    // Serve the built frontend before running tests
-    webServer: {
-        command: 'npm run preview --prefix client',
-        url: 'http://localhost:4173/',
-        reuseExistingServer: true,
-        timeout: 120_000,
-    },
+    // Serve the backend and the built frontend before running tests
+    webServer: [
+        {
+            command: 'npm start --prefix server',
+            port: 5001,
+            reuseExistingServer: true,
+        },
+        {
+            command: 'npm run preview --prefix client',
+            port: 4173,
+            reuseExistingServer: true,
+            timeout: 120_000,
+        },
+    ],
 });
+
 

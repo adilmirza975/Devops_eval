@@ -53,8 +53,11 @@ jobs:
           cache: 'npm'
       - name: Install Root Deps
         run: npm ci
+      - name: Install Server Deps (for WebServer)
+        run: cd server && npm ci
       - name: Install Client Deps (for WebServer)
         run: cd client && npm ci
+
       - name: Build Client (for WebServer)
         run: cd client && npm run build
       - name: Cache Playwright Browsers
