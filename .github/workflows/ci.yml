@@ -11,49 +11,71 @@ env:
   PROJECT_NAME: shopsmartrevised
 
 jobs:
-  test:
-    name: Phase 1 - Testing
+  # Phase 1: Testing (Optimized with Parallelism and Caching)
+  test-client:
+    name: Test - Client
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
-
-      - name: Install Dependencies (Root)
-        run: npm install
-
-      - name: Install Dependencies (Client)
-        run: cd client && npm install
-
-      - name: Install Dependencies (Server)
-        run: cd server && npm install
-
+          cache-dependency-path: client/package-lock.json
+      - name: Install Client Deps
+        run: cd client && npm ci
       - name: Run Client Tests
         run: cd client && npm test -- --run
 
+  test-server:
+    name: Test - Server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+      - name: Install Server Deps
+        run: cd server && npm ci
       - name: Run Server Tests
         run: cd server && npm test
 
+  test-e2e:
+    name: Test - E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      - name: Install Root Deps
+        run: npm ci
+      - name: Cache Playwright Browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright Browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps
       - name: Run E2E Tests
-        run: npx playwright install --with-deps && npm run test:e2e
-
-      - name: Upload Test Results
+        run: npm run test:e2e
+      - name: Upload Playwright Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
-          path: |
-            **/test-results/
-            **/playwright-report/
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
 
   terraform:
     name: Phase 2 - Infrastructure Provisioning
-    needs: test
+    needs: [test-client, test-server, test-e2e]
+
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
