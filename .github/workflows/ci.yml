@@ -55,7 +55,10 @@ jobs:
         run: npm ci
       - name: Install Client Deps (for WebServer)
         run: cd client && npm ci
+      - name: Build Client (for WebServer)
+        run: cd client && npm run build
       - name: Cache Playwright Browsers
+
         id: playwright-cache
         uses: actions/cache@v4
         with:

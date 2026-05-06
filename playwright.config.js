@@ -20,6 +20,7 @@ export default defineConfig({
         command: 'npm run preview --prefix client',
         url: 'http://localhost:4173/',
         reuseExistingServer: true,
-        timeout: 30_000,
+        timeout: 120_000,
     },
 });
+
